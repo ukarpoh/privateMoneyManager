@@ -135,3 +135,55 @@ class Database:
                 return conn.execute(
                     "SELECT * FROM expenses ORDER BY date ASC, id ASC"
                 ).fetchall()
+
+    def get_expenses_by_date_range(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT * FROM expenses WHERE date BETWEEN ? AND ? "
+                "ORDER BY date ASC, id ASC",
+                (start_date, end_date),
+            ).fetchall()
+
+    def search_expenses(self, keyword: str, limit: int = 20) -> list[sqlite3.Row]:
+        pattern = f"%{keyword}%"
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT * FROM expenses "
+                "WHERE description LIKE ? OR note LIKE ? "
+                "ORDER BY date DESC, id DESC LIMIT ?",
+                (pattern, pattern, limit),
+            ).fetchall()
+
+    def get_recent_monthly_totals(self, months: int = 4) -> list[tuple]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT strftime('%Y-%m', date) as ym, SUM(amount) as total "
+                "FROM expenses GROUP BY ym ORDER BY ym DESC LIMIT ?",
+                (months,),
+            ).fetchall()
+            return [(r["ym"], r["total"]) for r in rows]
+
+    def get_monthly_avg_daily(self, year: int, month: int) -> float:
+        prefix = f"{year}-{month:02d}"
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT date) as days, SUM(amount) as total "
+                "FROM expenses WHERE date LIKE ?",
+                (f"{prefix}%",),
+            ).fetchone()
+            days = row["days"] or 1
+            total = row["total"] or 0.0
+            return total / days
+
+    def update_expense(self, expense_id: int, **fields) -> bool:
+        allowed = {"amount", "description", "note", "category", "date"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [expense_id]
+        with self._conn() as conn:
+            cur = conn.execute(
+                f"UPDATE expenses SET {set_clause} WHERE id = ?", values
+            )
+            return cur.rowcount > 0

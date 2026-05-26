@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import date
-from config import DB_PATH, CURRENCY_SYMBOL
+
+from bot.config import CURRENCY_SYMBOL, DB_PATH
 
 
 class Database:
@@ -12,7 +13,7 @@ class Database:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def init_db(self):
+    def init_db(self) -> None:
         with self._conn() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS expenses (
@@ -41,8 +42,11 @@ class Database:
                     ON expenses(category);
             """)
 
-    def add_expense(self, amount: float, description: str, note: str,
-                    category: str, expense_date: str) -> int:
+    # ── Expenses ──────────────────────────────────────────────────────────────
+
+    def add_expense(
+        self, amount: float, description: str, note: str, category: str, expense_date: str
+    ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
                 "INSERT INTO expenses (amount, description, note, category, date) "
@@ -60,16 +64,67 @@ class Database:
     def get_recent(self, limit: int = 10) -> list[sqlite3.Row]:
         with self._conn() as conn:
             return conn.execute(
-                "SELECT * FROM expenses ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                "SELECT * FROM expenses ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
 
     def delete_expense(self, expense_id: int) -> bool:
         with self._conn() as conn:
+            cur = conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+            return cur.rowcount > 0
+
+    def update_expense(self, expense_id: int, **fields) -> bool:
+        allowed = {"amount", "description", "note", "category", "date"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [expense_id]
+        with self._conn() as conn:
             cur = conn.execute(
-                "DELETE FROM expenses WHERE id = ?", (expense_id,)
+                f"UPDATE expenses SET {set_clause} WHERE id = ?", values
             )
             return cur.rowcount > 0
+
+    def search_expenses(self, keyword: str, limit: int = 20) -> list[sqlite3.Row]:
+        pattern = f"%{keyword}%"
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT * FROM expenses "
+                "WHERE description LIKE ? OR note LIKE ? "
+                "ORDER BY date DESC, id DESC LIMIT ?",
+                (pattern, pattern, limit),
+            ).fetchall()
+
+    def get_expenses_by_period(
+        self, year: int | None = None, month: int | None = None
+    ) -> list[sqlite3.Row]:
+        with self._conn() as conn:
+            if year and month:
+                prefix = f"{year}-{month:02d}"
+                return conn.execute(
+                    "SELECT * FROM expenses WHERE date LIKE ? ORDER BY date ASC, id ASC",
+                    (f"{prefix}%",),
+                ).fetchall()
+            if year:
+                return conn.execute(
+                    "SELECT * FROM expenses WHERE date LIKE ? ORDER BY date ASC, id ASC",
+                    (f"{year}%",),
+                ).fetchall()
+            return conn.execute(
+                "SELECT * FROM expenses ORDER BY date ASC, id ASC"
+            ).fetchall()
+
+    def get_expenses_by_date_range(
+        self, start_date: str, end_date: str
+    ) -> list[sqlite3.Row]:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT * FROM expenses WHERE date BETWEEN ? AND ? "
+                "ORDER BY date ASC, id ASC",
+                (start_date, end_date),
+            ).fetchall()
+
+    # ── Summaries ─────────────────────────────────────────────────────────────
 
     def get_monthly_summary(self, year: int, month: int) -> list[tuple]:
         prefix = f"{year}-{month:02d}"
@@ -101,64 +156,6 @@ class Database:
             ).fetchone()
             return row["total"] or 0.0
 
-    def set_budget(self, category: str, monthly_limit: float):
-        with self._conn() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO budgets (category, monthly_limit) VALUES (?, ?)",
-                (category, monthly_limit),
-            )
-
-    def get_budget(self, category: str) -> float | None:
-        with self._conn() as conn:
-            row = conn.execute(
-                "SELECT monthly_limit FROM budgets WHERE category = ?",
-                (category,),
-            ).fetchone()
-            return row["monthly_limit"] if row else None
-
-    def get_all_budgets(self) -> dict[str, float]:
-        with self._conn() as conn:
-            rows = conn.execute("SELECT category, monthly_limit FROM budgets").fetchall()
-            return {r["category"]: r["monthly_limit"] for r in rows}
-
-    def get_expenses_by_period(
-        self, year: int | None = None, month: int | None = None
-    ) -> list[sqlite3.Row]:
-        with self._conn() as conn:
-            if year and month:
-                prefix = f"{year}-{month:02d}"
-                return conn.execute(
-                    "SELECT * FROM expenses WHERE date LIKE ? ORDER BY date ASC, id ASC",
-                    (f"{prefix}%",),
-                ).fetchall()
-            elif year:
-                return conn.execute(
-                    "SELECT * FROM expenses WHERE date LIKE ? ORDER BY date ASC, id ASC",
-                    (f"{year}%",),
-                ).fetchall()
-            else:
-                return conn.execute(
-                    "SELECT * FROM expenses ORDER BY date ASC, id ASC"
-                ).fetchall()
-
-    def get_expenses_by_date_range(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
-        with self._conn() as conn:
-            return conn.execute(
-                "SELECT * FROM expenses WHERE date BETWEEN ? AND ? "
-                "ORDER BY date ASC, id ASC",
-                (start_date, end_date),
-            ).fetchall()
-
-    def search_expenses(self, keyword: str, limit: int = 20) -> list[sqlite3.Row]:
-        pattern = f"%{keyword}%"
-        with self._conn() as conn:
-            return conn.execute(
-                "SELECT * FROM expenses "
-                "WHERE description LIKE ? OR note LIKE ? "
-                "ORDER BY date DESC, id DESC LIMIT ?",
-                (pattern, pattern, limit),
-            ).fetchall()
-
     def get_recent_monthly_totals(self, months: int = 4) -> list[tuple]:
         with self._conn() as conn:
             rows = conn.execute(
@@ -180,18 +177,28 @@ class Database:
             total = row["total"] or 0.0
             return total / days
 
-    def update_expense(self, expense_id: int, **fields) -> bool:
-        allowed = {"amount", "description", "note", "category", "date"}
-        updates = {k: v for k, v in fields.items() if k in allowed}
-        if not updates:
-            return False
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [expense_id]
+    # ── Budgets ───────────────────────────────────────────────────────────────
+
+    def set_budget(self, category: str, monthly_limit: float) -> None:
         with self._conn() as conn:
-            cur = conn.execute(
-                f"UPDATE expenses SET {set_clause} WHERE id = ?", values
+            conn.execute(
+                "INSERT OR REPLACE INTO budgets (category, monthly_limit) VALUES (?, ?)",
+                (category, monthly_limit),
             )
-            return cur.rowcount > 0
+
+    def get_budget(self, category: str) -> float | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT monthly_limit FROM budgets WHERE category = ?", (category,)
+            ).fetchone()
+            return row["monthly_limit"] if row else None
+
+    def get_all_budgets(self) -> dict[str, float]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT category, monthly_limit FROM budgets").fetchall()
+            return {r["category"]: r["monthly_limit"] for r in rows}
+
+    # ── Settings ──────────────────────────────────────────────────────────────
 
     def get_setting(self, key: str, default: str = "") -> str:
         with self._conn() as conn:

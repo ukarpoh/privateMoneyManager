@@ -1,32 +1,39 @@
 import logging
 import os
 from logging.handlers import TimedRotatingFileHandler
+
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
     filters,
 )
-from config import BOT_TOKEN, LOG_PATH
+
+from bot.config import BOT_TOKEN, LOG_PATH
+from bot.handlers.callbacks import handle_callback
+from bot.handlers.commands import (
+    budget,
+    cancel,
+    currency_cmd,
+    delete,
+    edit_expense,
+    export_csv,
+    help_cmd,
+    recent,
+    search,
+    start,
+    stats,
+    summary,
+)
+from bot.handlers.expense import handle_expense
+from bot.services.database import Database
 
 os.makedirs(os.path.dirname(LOG_PATH) or ".", exist_ok=True)
-from services.database import Database
-from handlers.expense import handle_expense
-from handlers.commands import (
-    start, summary, recent, search, stats,
-    delete, edit_expense, budget, export_csv, currency_cmd, help_cmd, cancel,
-)
-from handlers.callbacks import handle_callback
 
 _fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-_file_handler = TimedRotatingFileHandler(
-    LOG_PATH,
-    when="midnight",
-    backupCount=3,
-    encoding="utf-8",
-)
+_file_handler = TimedRotatingFileHandler(LOG_PATH, when="midnight", backupCount=3, encoding="utf-8")
 _file_handler.setFormatter(_fmt)
 
 _console_handler = logging.StreamHandler()
@@ -37,7 +44,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 
 
-def main():
+def main() -> None:
     db = Database()
     db.init_db()
 
@@ -60,7 +67,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense))
 
-    logging.info("Bot started. Polling...")
+    logging.info("Bot started. Polling…")
     app.run_polling()
 
 

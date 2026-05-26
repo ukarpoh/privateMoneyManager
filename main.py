@@ -1,4 +1,5 @@
 import logging
+import os
 from logging.handlers import TimedRotatingFileHandler
 from telegram.ext import (
     Application,
@@ -8,6 +9,8 @@ from telegram.ext import (
     filters,
 )
 from config import BOT_TOKEN, LOG_PATH
+
+os.makedirs(os.path.dirname(LOG_PATH) or ".", exist_ok=True)
 from services.database import Database
 from handlers.expense import handle_expense
 from handlers.commands import (

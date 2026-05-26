@@ -47,6 +47,7 @@ logging.getLogger("telegram").setLevel(logging.WARNING)
 def main() -> None:
     db = Database()
     db.init_db()
+    logging.info("Database path: %s (resolved: %s)", db.path, os.path.abspath(db.path))
 
     app = Application.builder().token(BOT_TOKEN).build()
     app.bot_data["db"] = db

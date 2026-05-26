@@ -4,7 +4,7 @@ import re
 from datetime import date
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from config import CATEGORIES, BUDGET_WARN_PCT, BUDGET_LIMIT_PCT
+from bot.config import CATEGORIES, BUDGET_WARN_PCT, BUDGET_LIMIT_PCT
 
 HELP_TEXT = (
     "*Budget Bot Commands*\n\n"
@@ -271,7 +271,7 @@ async def edit_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"No expense found with ID #{expense_id}.")
             return
 
-        from handlers.expense import _build_edit_card
+        from bot.handlers.expense import _build_edit_card
         text, keyboard = _build_edit_card(row, currency)
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
     else:

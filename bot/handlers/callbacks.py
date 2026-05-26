@@ -2,7 +2,7 @@ import logging
 from datetime import date
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from config import BUDGET_WARN_PCT, BUDGET_LIMIT_PCT, CATEGORIES
+from bot.config import BUDGET_WARN_PCT, BUDGET_LIMIT_PCT, CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("This expense card has expired.")
             return
         pending["date"] = new_date
-        from handlers.expense import _build_confirm_card
+        from bot.handlers.expense import _build_confirm_card
         text, keyboard = _build_confirm_card(pending, currency)
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
@@ -106,7 +106,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not pending:
             await query.edit_message_text("This expense card has expired.")
             return
-        from handlers.expense import _build_confirm_card
+        from bot.handlers.expense import _build_confirm_card
         text, keyboard = _build_confirm_card(pending, currency)
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
@@ -117,7 +117,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not row:
             await query.edit_message_text("Expense not found.")
             return
-        from handlers.expense import _build_edit_card
+        from bot.handlers.expense import _build_edit_card
         text, keyboard = _build_edit_card(row, currency)
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
@@ -176,7 +176,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.update_expense(expense_id, category=category)
         logger.info("[EDIT] id=%s category → %s", expense_id, category)
         row = db.get_expense(expense_id)
-        from handlers.expense import _build_edit_card
+        from bot.handlers.expense import _build_edit_card
         text, keyboard = _build_edit_card(row, currency)
         await query.edit_message_text(
             f"✅ Category updated to *{category}*\n\n" + text,

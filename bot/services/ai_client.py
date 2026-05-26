@@ -1,8 +1,10 @@
 import json
 import logging
 from datetime import date
+
 from openai import OpenAI
-from config import KIMI_API_KEY, CATEGORIES
+
+from bot.config import CATEGORIES, KIMI_API_KEY
 
 logger = logging.getLogger(__name__)
 

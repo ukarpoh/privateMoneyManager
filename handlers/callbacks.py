@@ -21,6 +21,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     db = context.bot_data["db"]
     today = date.today()
+    currency = context.bot_data.get("currency", "RM")
 
     # ── Category selection: save new expense ──────────────────────────────────
     if data.startswith("cat_select:"):
@@ -39,7 +40,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             expense_date=pending["date"],
         )
         logger.info(
-            "[SAVE] id=%s | %s | RM %.2f | %s | date=%s | note=%r",
+            "[SAVE] id=%s | %s | %.2f | %s | date=%s | note=%r",
             expense_id, pending["description"], pending["amount"],
             category, pending["date"], pending["note"],
         )
@@ -52,13 +53,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if limit and limit > 0:
             pct = spent / limit
             if pct >= BUDGET_LIMIT_PCT:
-                warning = f"\n\n🚨 *Over budget!* {category}: RM {spent:.2f} / RM {limit:.2f}"
+                warning = f"\n\n🚨 *Over budget!* {category}: {currency} {spent:.2f} / {currency} {limit:.2f}"
             elif pct >= BUDGET_WARN_PCT:
-                warning = f"\n\n⚠️ {category} at {pct:.0%} of budget (RM {spent:.2f} / RM {limit:.2f})"
+                warning = f"\n\n⚠️ {category} at {pct:.0%} of budget ({currency} {spent:.2f} / {currency} {limit:.2f})"
 
         receipt = (
             f"✅ Saved #{expense_id}: *{pending['description']}* — "
-            f"RM {pending['amount']:.2f} — {category}{warning}"
+            f"{currency} {pending['amount']:.2f} — {category}{warning}"
         )
         await query.edit_message_text(receipt, parse_mode="Markdown")
 
@@ -72,7 +73,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         pending["date"] = new_date
         from handlers.expense import _build_confirm_card
-        text, keyboard = _build_confirm_card(pending)
+        text, keyboard = _build_confirm_card(pending, currency)
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
     # ── Custom date: prompt for text input ────────────────────────────────────
@@ -87,7 +88,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["date_prompt_chat_id"] = query.message.chat_id
         await query.edit_message_text(
             f"*Enter date for this expense:*\n"
-            f"_{pending['description']} — RM {pending['amount']:.2f}_\n\n"
+            f"_{pending['description']} — {currency} {pending['amount']:.2f}_\n\n"
             f"Accepted formats: `YYYY-MM-DD`, `DD/MM/YYYY`, `today`, `yesterday`",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[
@@ -106,7 +107,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("This expense card has expired.")
             return
         from handlers.expense import _build_confirm_card
-        text, keyboard = _build_confirm_card(pending)
+        text, keyboard = _build_confirm_card(pending, currency)
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
     # ── Edit: select expense from list ────────────────────────────────────────
@@ -117,7 +118,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Expense not found.")
             return
         from handlers.expense import _build_edit_card
-        text, keyboard = _build_edit_card(row)
+        text, keyboard = _build_edit_card(row, currency)
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
     # ── Edit: choose field to edit ────────────────────────────────────────────
@@ -176,7 +177,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("[EDIT] id=%s category → %s", expense_id, category)
         row = db.get_expense(expense_id)
         from handlers.expense import _build_edit_card
-        text, keyboard = _build_edit_card(row)
+        text, keyboard = _build_edit_card(row, currency)
         await query.edit_message_text(
             f"✅ Category updated to *{category}*\n\n" + text,
             parse_mode="Markdown",
@@ -200,7 +201,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         note = f" ({row['note']})" if row['note'] else ""
         text = (
             f"Delete this expense?\n\n"
-            f"#{row['id']} | {row['date']} | {row['description']}{note} | RM {row['amount']:.2f}"
+            f"#{row['id']} | {row['date']} | {row['description']}{note} | {currency} {row['amount']:.2f}"
         )
         keyboard = InlineKeyboardMarkup([
             [
@@ -218,7 +219,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Expense not found.")
             return
         db.delete_expense(expense_id)
-        logger.info("[DELETE] id=%s | %s RM %.2f", expense_id, row["description"], row["amount"])
+        logger.info("[DELETE] id=%s | %s %.2f", expense_id, row["description"], row["amount"])
         await query.edit_message_text(f"🗑 Expense #{expense_id} deleted.")
 
     # ── Delete: cancelled ─────────────────────────────────────────────────────

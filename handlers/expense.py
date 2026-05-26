@@ -44,7 +44,21 @@ def _parse_date_input(text: str) -> str | None:
     return None
 
 
-def _build_confirm_card(pending: dict) -> tuple[str, InlineKeyboardMarkup]:
+def _parse_amount(text: str) -> float | None:
+    t = re.sub(r"[^\d.,\-]", "", text.strip())
+    if not t:
+        return None
+    if "," in t and "." in t:
+        t = t.replace(",", "")
+    elif "," in t:
+        t = t.replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def _build_confirm_card(pending: dict, currency: str = "RM") -> tuple[str, InlineKeyboardMarkup]:
     amount = pending["amount"]
     description = pending["description"]
     note = pending["note"] or "—"
@@ -53,7 +67,7 @@ def _build_confirm_card(pending: dict) -> tuple[str, InlineKeyboardMarkup]:
 
     text = (
         f"*New Expense*\n\n"
-        f"Amount:       RM {amount:.2f}\n"
+        f"Amount:       {currency} {amount:.2f}\n"
         f"Description:  {description}\n"
         f"Note:         {note}\n"
         f"Date:         {exp_date}\n\n"
@@ -87,7 +101,7 @@ def _build_confirm_card(pending: dict) -> tuple[str, InlineKeyboardMarkup]:
     return text, InlineKeyboardMarkup(buttons)
 
 
-def _build_edit_card(row) -> tuple[str, InlineKeyboardMarkup]:
+def _build_edit_card(row, currency: str = "RM") -> tuple[str, InlineKeyboardMarkup]:
     note = row["note"] or "—"
     text = (
         f"*Edit Expense #{row['id']}*\n\n"
@@ -95,7 +109,7 @@ def _build_edit_card(row) -> tuple[str, InlineKeyboardMarkup]:
         f"Category:     {row['category']}\n"
         f"Description:  {row['description']}\n"
         f"Note:         {note}\n"
-        f"Amount:       RM {row['amount']:.2f}\n\n"
+        f"Amount:       {currency} {row['amount']:.2f}\n\n"
         f"_Tap a field to edit:_"
     )
     eid = row["id"]
@@ -119,6 +133,7 @@ def _build_edit_card(row) -> tuple[str, InlineKeyboardMarkup]:
 async def handle_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user = update.effective_user
+    currency = context.bot_data.get("currency", "RM")
 
     # ── Intercept: waiting for custom date input for a pending expense ─────────
     waiting_uid = context.user_data.get("waiting_for_date_uid")
@@ -128,7 +143,7 @@ async def handle_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if parsed:
             pending["date"] = parsed
             context.user_data.pop("waiting_for_date_uid", None)
-            msg_text, keyboard = _build_confirm_card(pending)
+            msg_text, keyboard = _build_confirm_card(pending, currency)
             prompt_msg_id = context.user_data.pop("date_prompt_msg_id", None)
             prompt_chat_id = context.user_data.pop("date_prompt_chat_id", None)
             if prompt_msg_id and prompt_chat_id:
@@ -162,8 +177,8 @@ async def handle_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
         value: str | float = text
         if field == "amount":
             try:
-                value = float(text.replace("RM", "").replace(",", "").strip())
-                if value <= 0:
+                value = _parse_amount(text)
+                if value is None or value <= 0:
                     raise ValueError
             except ValueError:
                 await update.message.reply_text("Invalid amount. Enter a positive number (e.g. `15.50`).", parse_mode="Markdown")
@@ -180,7 +195,7 @@ async def handle_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("waiting_for_edit", None)
 
         field_label = field.replace("_", " ").title()
-        display_value = f"RM {value:.2f}" if field == "amount" else str(value)
+        display_value = f"{currency} {value:.2f}" if field == "amount" else str(value)
 
         prompt_msg_id = edit_state.get("prompt_msg_id")
         prompt_chat_id = edit_state.get("prompt_chat_id")
@@ -188,7 +203,7 @@ async def handle_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
         success_text = f"✅ Expense #{expense_id} updated: *{field_label}* → {display_value}"
         if prompt_msg_id and prompt_chat_id and row:
             from handlers.expense import _build_edit_card
-            card_text, card_kb = _build_edit_card(row)
+            card_text, card_kb = _build_edit_card(row, currency)
             try:
                 await context.bot.edit_message_text(
                     chat_id=prompt_chat_id,
@@ -257,7 +272,7 @@ async def handle_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "suggested_category": suggested,
         }
 
-        msg_text, keyboard = _build_confirm_card(context.user_data[uid])
+        msg_text, keyboard = _build_confirm_card(context.user_data[uid], currency)
         await update.message.reply_text(msg_text, parse_mode="Markdown", reply_markup=keyboard)
         sent += 1
 

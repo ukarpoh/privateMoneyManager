@@ -115,3 +115,23 @@ class Database:
         with self._conn() as conn:
             rows = conn.execute("SELECT category, monthly_limit FROM budgets").fetchall()
             return {r["category"]: r["monthly_limit"] for r in rows}
+
+    def get_expenses_by_period(
+        self, year: int | None = None, month: int | None = None
+    ) -> list[sqlite3.Row]:
+        with self._conn() as conn:
+            if year and month:
+                prefix = f"{year}-{month:02d}"
+                return conn.execute(
+                    "SELECT * FROM expenses WHERE date LIKE ? ORDER BY date ASC, id ASC",
+                    (f"{prefix}%",),
+                ).fetchall()
+            elif year:
+                return conn.execute(
+                    "SELECT * FROM expenses WHERE date LIKE ? ORDER BY date ASC, id ASC",
+                    (f"{year}%",),
+                ).fetchall()
+            else:
+                return conn.execute(
+                    "SELECT * FROM expenses ORDER BY date ASC, id ASC"
+                ).fetchall()

@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 from datetime import date
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -10,9 +11,13 @@ HELP_TEXT = (
     "Just send a message like _lunch 15.50_ to log an expense.\n\n"
     "/summary — Monthly spending breakdown\n"
     "/recent [N] — Last N expenses (default 10)\n"
+    "/search <keyword> — Search expenses by description or note\n"
+    "/stats — Spending trends and statistics\n"
     "/delete [id] — Delete an expense by ID\n"
+    "/edit [id] — Edit a saved expense\n"
     "/budget [category] [amount] — View or set monthly budgets\n"
-    "/export [YYYY-MM|YYYY|all] — Export expenses as CSV\n"
+    "/export [YYYY-MM|YYYY|all|start end] — Export expenses as CSV\n"
+    "/cancel — Cancel any pending input\n"
     "/help — Show this message"
 )
 
@@ -28,6 +33,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(HELP_TEXT, parse_mode="Markdown")
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cleared = False
+    if context.user_data.pop("waiting_for_date_uid", None):
+        context.user_data.pop("date_prompt_msg_id", None)
+        context.user_data.pop("date_prompt_chat_id", None)
+        cleared = True
+    if context.user_data.pop("waiting_for_edit", None):
+        cleared = True
+    if cleared:
+        await update.message.reply_text("Input cancelled.")
+    else:
+        await update.message.reply_text("Nothing to cancel.")
 
 
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -88,6 +107,73 @@ async def recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = context.bot_data["db"]
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: `/search <keyword>`", parse_mode="Markdown")
+        return
+
+    keyword = " ".join(args)
+    rows = db.search_expenses(keyword)
+    if not rows:
+        await update.message.reply_text(f'No expenses found matching "{keyword}".')
+        return
+
+    lines = [f'*Results for "{keyword}":*\n']
+    for r in rows:
+        note = f" ({r['note']})" if r["note"] else ""
+        lines.append(
+            f"#{r['id']} | {r['date']} | {r['category']} | "
+            f"{r['description']}{note} | RM {r['amount']:.2f}"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = context.bot_data["db"]
+    today = date.today()
+    this_month_str = today.strftime("%Y-%m")
+
+    monthly = db.get_recent_monthly_totals(4)
+    if not monthly:
+        await update.message.reply_text("No expenses recorded yet.")
+        return
+
+    avg_daily = db.get_monthly_avg_daily(today.year, today.month)
+    summary = db.get_monthly_summary(today.year, today.month)
+    this_total = next((t for ym, t in monthly if ym == this_month_str), 0.0)
+    last_total = next((t for ym, t in monthly if ym != this_month_str), None)
+
+    lines = ["*Spending Statistics* 📊\n"]
+
+    lines.append("*Monthly Totals:*")
+    prev_total = None
+    for ym, total in reversed(monthly):
+        if prev_total is not None and prev_total > 0:
+            diff_pct = ((total - prev_total) / prev_total) * 100
+            trend = f"  (▲ +{diff_pct:.0f}%)" if diff_pct >= 0 else f"  (▼ {diff_pct:.0f}%)"
+        else:
+            trend = ""
+        cur_tag = "  ◀ now" if ym == this_month_str else ""
+        lines.append(f"  {ym}: RM {total:.2f}{trend}{cur_tag}")
+        prev_total = total
+
+    lines.append(f"\n*{today.strftime('%B %Y')}:*")
+    lines.append(f"  Total: RM {this_total:.2f}")
+    lines.append(f"  Daily avg: RM {avg_daily:.2f}")
+    if summary:
+        top_cat, top_spent = summary[0]
+        lines.append(f"  Top category: {top_cat} (RM {top_spent:.2f})")
+    if last_total and last_total > 0:
+        diff = this_total - last_total
+        diff_pct = (diff / last_total) * 100
+        sign = "+" if diff >= 0 else ""
+        lines.append(f"  vs last month: {sign}RM {diff:.2f} ({sign}{diff_pct:.1f}%)")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
 async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
     args = context.args
@@ -134,6 +220,45 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def edit_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = context.bot_data["db"]
+    args = context.args
+
+    if args:
+        try:
+            expense_id = int(args[0])
+        except ValueError:
+            await update.message.reply_text(
+                "Usage: `/edit <id>`  (use /recent to find IDs)", parse_mode="Markdown"
+            )
+            return
+
+        row = db.get_expense(expense_id)
+        if not row:
+            await update.message.reply_text(f"No expense found with ID #{expense_id}.")
+            return
+
+        from handlers.expense import _build_edit_card
+        text, keyboard = _build_edit_card(row)
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    else:
+        rows = db.get_recent(5)
+        if not rows:
+            await update.message.reply_text("No expenses to edit.")
+            return
+
+        buttons = []
+        for r in rows:
+            note = f" ({r['note']})" if r["note"] else ""
+            label = f"#{r['id']} {r['description']}{note} — RM {r['amount']:.2f}"
+            buttons.append([InlineKeyboardButton(label, callback_data=f"edit_select:{r['id']}")])
+
+        await update.message.reply_text(
+            "Select an expense to edit:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+
 async def budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
     args = context.args
@@ -165,8 +290,6 @@ async def budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
         return
 
-    # Parse: /budget <category> <amount>
-    # Category may have spaces, so amount is always the last arg
     try:
         amount = float(args[-1])
     except ValueError:
@@ -196,50 +319,56 @@ async def budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
     args = context.args
+    today = date.today()
 
     year = None
     month = None
-    today = date.today()
+    start_date = None
+    end_date = None
+    filename = None
+    period_label = None
 
-    if not args or args[0].lower() == "all":
+    date_re = r"^\d{4}-\d{2}-\d{2}$"
+
+    if not args:
+        year, month = today.year, today.month
+        filename = f"expenses_{today.strftime('%Y-%m')}.csv"
+        period_label = today.strftime("%B %Y")
+    elif len(args) == 2 and re.match(date_re, args[0]) and re.match(date_re, args[1]):
+        start_date, end_date = args[0], args[1]
+        filename = f"expenses_{start_date}_to_{end_date}.csv"
+        period_label = f"{start_date} to {end_date}"
+    elif args[0].lower() == "all":
         filename = "expenses_all.csv"
         period_label = "all time"
-    elif len(args[0]) == 7 and args[0][4] == "-":
+    elif re.match(r"^\d{4}-\d{2}$", args[0]):
         try:
             year, month = int(args[0][:4]), int(args[0][5:7])
             filename = f"expenses_{args[0]}.csv"
             period_label = args[0]
         except ValueError:
-            await update.message.reply_text(
-                "Usage: `/export`, `/export YYYY-MM`, `/export YYYY`, `/export all`",
-                parse_mode="Markdown",
-            )
-            return
-    elif len(args[0]) == 4:
-        try:
-            year = int(args[0])
-            filename = f"expenses_{year}.csv"
-            period_label = str(year)
-        except ValueError:
-            await update.message.reply_text(
-                "Usage: `/export`, `/export YYYY-MM`, `/export YYYY`, `/export all`",
-                parse_mode="Markdown",
-            )
-            return
-    else:
+            pass
+    elif re.match(r"^\d{4}$", args[0]):
+        year = int(args[0])
+        filename = f"expenses_{year}.csv"
+        period_label = str(year)
+
+    if filename is None:
         await update.message.reply_text(
-            "Usage: `/export`, `/export YYYY-MM`, `/export YYYY`, `/export all`",
+            "Usage:\n"
+            "  `/export` — current month\n"
+            "  `/export YYYY-MM` — specific month\n"
+            "  `/export YYYY` — full year\n"
+            "  `/export all` — all expenses\n"
+            "  `/export YYYY-MM-DD YYYY-MM-DD` — date range",
             parse_mode="Markdown",
         )
         return
 
-    # Default (no args) → current month
-    if not args:
-        year, month = today.year, today.month
-        filename = f"expenses_{today.strftime('%Y-%m')}.csv"
-        period_label = today.strftime("%B %Y")
-
-    rows = db.get_expenses_by_period(year, month)
+    if start_date and end_date:
+        rows = db.get_expenses_by_date_range(start_date, end_date)
+    else:
+        rows = db.get_expenses_by_period(year, month)
 
     if not rows:
         await update.message.reply_text(f"No expenses found for {period_label}.")

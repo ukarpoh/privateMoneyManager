@@ -10,7 +10,10 @@ from telegram.ext import (
 from config import BOT_TOKEN, LOG_PATH
 from services.database import Database
 from handlers.expense import handle_expense
-from handlers.commands import start, summary, recent, delete, budget, help_cmd, export_csv
+from handlers.commands import (
+    start, summary, recent, search, stats,
+    delete, edit_expense, budget, export_csv, help_cmd, cancel,
+)
 from handlers.callbacks import handle_callback
 
 _fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -41,9 +44,13 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CommandHandler("recent", recent))
+    app.add_handler(CommandHandler("search", search))
+    app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("delete", delete))
+    app.add_handler(CommandHandler("edit", edit_expense))
     app.add_handler(CommandHandler("budget", budget))
     app.add_handler(CommandHandler("export", export_csv))
+    app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense))

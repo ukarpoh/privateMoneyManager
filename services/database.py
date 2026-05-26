@@ -1,6 +1,6 @@
 import sqlite3
 from datetime import date
-from config import DB_PATH
+from config import DB_PATH, CURRENCY_SYMBOL
 
 
 class Database:
@@ -28,6 +28,11 @@ class Database:
                 CREATE TABLE IF NOT EXISTS budgets (
                     category      TEXT PRIMARY KEY,
                     monthly_limit REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS settings (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_expenses_date
@@ -187,3 +192,23 @@ class Database:
                 f"UPDATE expenses SET {set_clause} WHERE id = ?", values
             )
             return cur.rowcount > 0
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+            return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+
+    def get_currency(self) -> str:
+        return self.get_setting("currency", CURRENCY_SYMBOL)
+
+    def set_currency(self, symbol: str) -> None:
+        self.set_setting("currency", symbol)

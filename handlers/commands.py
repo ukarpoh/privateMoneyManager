@@ -17,6 +17,7 @@ HELP_TEXT = (
     "/edit [id] — Edit a saved expense\n"
     "/budget [category] [amount] — View or set monthly budgets\n"
     "/export [YYYY-MM|YYYY|all|start end] — Export expenses as CSV\n"
+    "/currency [symbol] — View or change the currency symbol\n"
     "/cancel — Cancel any pending input\n"
     "/help — Show this message"
 )
@@ -33,6 +34,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(HELP_TEXT, parse_mode="Markdown")
+
+
+async def currency_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = context.bot_data["db"]
+    args = context.args
+
+    if not args:
+        current = context.bot_data.get("currency", "RM")
+        await update.message.reply_text(
+            f"Current currency symbol: *{current}*\n\n"
+            f"To change it: `/currency USD` or `/currency $` or `/currency €`",
+            parse_mode="Markdown",
+        )
+        return
+
+    symbol = args[0]
+    if len(symbol) > 10:
+        await update.message.reply_text("Currency symbol too long (max 10 characters).")
+        return
+
+    db.set_currency(symbol)
+    context.bot_data["currency"] = symbol
+    await update.message.reply_text(
+        f"Currency changed to *{symbol}*. All displays will now use this symbol.",
+        parse_mode="Markdown",
+    )
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -53,6 +80,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
     today = date.today()
     year, month = today.year, today.month
+    currency = context.bot_data.get("currency", "RM")
 
     monthly = db.get_monthly_summary(year, month)
     budgets = db.get_all_budgets()
@@ -78,16 +106,17 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 icon = "  "
                 tag = f"{pct:.0%}"
-            lines.append(f"{icon} {category}: RM {spent:.2f} / RM {limit:.2f}  {tag}")
+            lines.append(f"{icon} {category}: {currency} {spent:.2f} / {currency} {limit:.2f}  {tag}")
         else:
-            lines.append(f"   {category}: RM {spent:.2f}")
+            lines.append(f"   {category}: {currency} {spent:.2f}")
 
-    lines.append(f"\n*Total: RM {grand_total:.2f}*")
+    lines.append(f"\n*Total: {currency} {grand_total:.2f}*")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
+    currency = context.bot_data.get("currency", "RM")
     args = context.args
     try:
         limit = min(int(args[0]), 50) if args else 10
@@ -102,13 +131,14 @@ async def recent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [f"*Last {len(rows)} expenses:*\n"]
     for r in rows:
         note = f" ({r['note']})" if r['note'] else ""
-        lines.append(f"#{r['id']} | {r['date']} | {r['category']} | {r['description']}{note} | RM {r['amount']:.2f}")
+        lines.append(f"#{r['id']} | {r['date']} | {r['category']} | {r['description']}{note} | {currency} {r['amount']:.2f}")
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
+    currency = context.bot_data.get("currency", "RM")
     args = context.args
     if not args:
         await update.message.reply_text("Usage: `/search <keyword>`", parse_mode="Markdown")
@@ -125,7 +155,7 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         note = f" ({r['note']})" if r["note"] else ""
         lines.append(
             f"#{r['id']} | {r['date']} | {r['category']} | "
-            f"{r['description']}{note} | RM {r['amount']:.2f}"
+            f"{r['description']}{note} | {currency} {r['amount']:.2f}"
         )
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
@@ -134,6 +164,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
     today = date.today()
     this_month_str = today.strftime("%Y-%m")
+    currency = context.bot_data.get("currency", "RM")
 
     monthly = db.get_recent_monthly_totals(4)
     if not monthly:
@@ -156,26 +187,27 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             trend = ""
         cur_tag = "  ◀ now" if ym == this_month_str else ""
-        lines.append(f"  {ym}: RM {total:.2f}{trend}{cur_tag}")
+        lines.append(f"  {ym}: {currency} {total:.2f}{trend}{cur_tag}")
         prev_total = total
 
     lines.append(f"\n*{today.strftime('%B %Y')}:*")
-    lines.append(f"  Total: RM {this_total:.2f}")
-    lines.append(f"  Daily avg: RM {avg_daily:.2f}")
+    lines.append(f"  Total: {currency} {this_total:.2f}")
+    lines.append(f"  Daily avg: {currency} {avg_daily:.2f}")
     if summary:
         top_cat, top_spent = summary[0]
-        lines.append(f"  Top category: {top_cat} (RM {top_spent:.2f})")
+        lines.append(f"  Top category: {top_cat} ({currency} {top_spent:.2f})")
     if last_total and last_total > 0:
         diff = this_total - last_total
         diff_pct = (diff / last_total) * 100
         sign = "+" if diff >= 0 else ""
-        lines.append(f"  vs last month: {sign}RM {diff:.2f} ({sign}{diff_pct:.1f}%)")
+        lines.append(f"  vs last month: {sign}{currency} {diff:.2f} ({sign}{diff_pct:.1f}%)")
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
+    currency = context.bot_data.get("currency", "RM")
     args = context.args
 
     if args:
@@ -193,7 +225,7 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         note = f" ({row['note']})" if row['note'] else ""
         text = (
             f"Delete this expense?\n\n"
-            f"#{row['id']} | {row['date']} | {row['description']}{note} | RM {row['amount']:.2f}"
+            f"#{row['id']} | {row['date']} | {row['description']}{note} | {currency} {row['amount']:.2f}"
         )
         keyboard = InlineKeyboardMarkup([
             [
@@ -211,7 +243,7 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buttons = []
         for r in rows:
             note = f" ({r['note']})" if r['note'] else ""
-            label = f"#{r['id']} {r['description']}{note} — RM {r['amount']:.2f}"
+            label = f"#{r['id']} {r['description']}{note} — {currency} {r['amount']:.2f}"
             buttons.append([InlineKeyboardButton(label, callback_data=f"delete_select:{r['id']}")])
 
         await update.message.reply_text(
@@ -222,6 +254,7 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def edit_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
+    currency = context.bot_data.get("currency", "RM")
     args = context.args
 
     if args:
@@ -239,7 +272,7 @@ async def edit_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         from handlers.expense import _build_edit_card
-        text, keyboard = _build_edit_card(row)
+        text, keyboard = _build_edit_card(row, currency)
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
     else:
         rows = db.get_recent(5)
@@ -250,7 +283,7 @@ async def edit_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buttons = []
         for r in rows:
             note = f" ({r['note']})" if r["note"] else ""
-            label = f"#{r['id']} {r['description']}{note} — RM {r['amount']:.2f}"
+            label = f"#{r['id']} {r['description']}{note} — {currency} {r['amount']:.2f}"
             buttons.append([InlineKeyboardButton(label, callback_data=f"edit_select:{r['id']}")])
 
         await update.message.reply_text(
@@ -261,6 +294,7 @@ async def edit_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
+    currency = context.bot_data.get("currency", "RM")
     args = context.args
     today = date.today()
 
@@ -284,7 +318,7 @@ async def budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 icon = "⚠️"
             else:
                 icon = "  "
-            lines.append(f"{icon} {cat}: RM {spent:.2f} / RM {limit:.2f} ({pct:.0%})")
+            lines.append(f"{icon} {cat}: {currency} {spent:.2f} / {currency} {limit:.2f} ({pct:.0%})")
 
         lines.append("\nTo update: `/budget Category Amount`")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
@@ -312,12 +346,13 @@ async def budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db.set_budget(matched, amount)
     await update.message.reply_text(
-        f"Budget for *{matched}* set to RM {amount:.2f}/month.", parse_mode="Markdown"
+        f"Budget for *{matched}* set to {currency} {amount:.2f}/month.", parse_mode="Markdown"
     )
 
 
 async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = context.bot_data["db"]
+    currency = context.bot_data.get("currency", "RM")
     args = context.args
     today = date.today()
 
@@ -376,7 +411,7 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["ID", "Date", "Category", "Description", "Note", "Amount (RM)", "Created At"])
+    writer.writerow(["ID", "Date", "Category", "Description", "Note", f"Amount ({currency})", "Created At"])
     for r in rows:
         writer.writerow([
             r["id"],

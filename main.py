@@ -12,7 +12,7 @@ from services.database import Database
 from handlers.expense import handle_expense
 from handlers.commands import (
     start, summary, recent, search, stats,
-    delete, edit_expense, budget, export_csv, help_cmd, cancel,
+    delete, edit_expense, budget, export_csv, currency_cmd, help_cmd, cancel,
 )
 from handlers.callbacks import handle_callback
 
@@ -40,6 +40,7 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
     app.bot_data["db"] = db
+    app.bot_data["currency"] = db.get_currency()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("summary", summary))
@@ -50,6 +51,7 @@ def main():
     app.add_handler(CommandHandler("edit", edit_expense))
     app.add_handler(CommandHandler("budget", budget))
     app.add_handler(CommandHandler("export", export_csv))
+    app.add_handler(CommandHandler("currency", currency_cmd))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CallbackQueryHandler(handle_callback))

@@ -5,8 +5,8 @@ load_dotenv()
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 KIMI_API_KEY = os.environ["KIMI_API_KEY"]
-DB_PATH = os.getenv("DB_PATH", "budget_bot.db")
-LOG_PATH = os.getenv("LOG_PATH", "budget_bot.log")
+DB_PATH = os.getenv("DB_PATH", "/data/budget_bot.db")
+LOG_PATH = os.getenv("LOG_PATH", "/data/budget_bot.log")
 
 CATEGORIES = [
     "Food & Drinks",
